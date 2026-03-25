@@ -1,0 +1,30 @@
+name: 每日一歌
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # UTC 9点 = 北京时间 17点
+  workflow_dispatch:
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: pip install cryptography requests
+          
+      - name: Save cookie
+        env:
+          NCM_COOKIE: ${{ secrets.NCM_COOKIE }}
+        run: |
+          mkdir -p secrets
+          echo "$NCM_COOKIE" > secrets/netease_cookies.json
+          
+      - name: Run main
+        run: python3 main.py
