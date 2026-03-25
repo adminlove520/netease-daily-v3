@@ -10,8 +10,8 @@ import requests
 import json
 
 # Discussion 配置
-REPO_OWNER = "openclaw-qa"
-REPO_NAME = "tech-table"
+REPO_OWNER = "ythx-101"
+REPO_NAME = "openclaw-qa"
 DISCUSSION_ID = 133  # 茶馆 Discussion #133
 
 def post_to_discussion(content):
