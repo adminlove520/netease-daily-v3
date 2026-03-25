@@ -1,59 +1,11 @@
 #!/usr/bin/env python3
 """
 网易云音乐 - 主程序
-自动判断：Cookie 有效→日推，无效→榜单，推送到 Discussion
+自动判断：Cookie 有效→日推，无效→榜单
 """
 import os
 import sys
 import subprocess
-import requests
-import json
-
-# Discussion 配置
-REPO_OWNER = "ythx-101"
-REPO_NAME = "openclaw-qa"
-DISCUSSION_ID = 133  # 茶馆 Discussion #133
-
-def post_to_discussion(content):
-    """推送到 GitHub Discussion"""
-    token = os.environ.get('GH_TOKEN')
-    if not token:
-        print("❌ 未设置 GH_TOKEN")
-        return False
-    
-    query = """
-    mutation($discussionId: ID!, $body: String!) {
-        addDiscussionComment(input: {discussionId: $discussionId, body: $body}) {
-            comment { id }
-        }
-    }
-    """
-    
-    variables = {
-        "discussionId": str(DISCUSSION_ID),
-        "body": content
-    }
-    
-    url = "https://api.github.com/graphql"
-    headers = {
-        "Authorization": f"bearer {token}",
-        "Content-Type": "application/json"
-    }
-    
-    try:
-        response = requests.post(url, json={"query": query, "variables": variables}, 
-                                headers=headers, timeout=15)
-        result = response.json()
-        
-        if 'data' in result and result['data'].get('addDiscussionComment'):
-            print("✅ 推送成功！")
-            return True
-        else:
-            print(f"❌ 推送失败: {result}")
-            return False
-    except Exception as e:
-        print(f"❌ 推送异常: {e}")
-        return False
 
 def main():
     print("=== 🎵 每日一歌 ===\n")
@@ -90,10 +42,10 @@ def main():
             print(f"❌ 获取失败: {result.stderr}")
             return
     
-    # 推送到 Discussion
+    # 推送
     if content:
-        print("\n📤 推送到茶馆...")
-        post_to_discussion(content)
+        print("\n📤 推送到 Discussion...")
+        subprocess.run(['python3', 'push.py', content])
 
 if __name__ == '__main__':
     main()
