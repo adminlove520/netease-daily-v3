@@ -26,5 +26,7 @@ jobs:
           mkdir -p secrets
           echo "$NCM_COOKIE" > secrets/netease_cookies.json
           
-      - name: Run main
+      - name: Run main (get + push)
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: python3 main.py
