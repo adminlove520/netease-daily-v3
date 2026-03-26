@@ -17,7 +17,7 @@ jobs:
           python-version: '3.10'
           
       - name: Install dependencies
-        run: pip install cryptography requests
+        run: pip install cryptography requests python-dotenv
           
       - name: Save cookie
         env:
