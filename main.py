@@ -52,9 +52,12 @@ def main():
     # 推送（需要 GH_TOKEN 才推送）
     if content and os.environ.get('GH_TOKEN'):
         print("\n📤 推送到 Discussion...")
-        subprocess.run(['python3', 'push.py', content])
+        # 通过 stdin 传递内容
+        subprocess.run([PYTHON, 'push.py'], input=content, text=True)
     elif content:
         print("\n⚠️ 未设置 GH_TOKEN，仅获取内容不推送")
+        print("\n" + "="*40)
+        print(content)
 
 if __name__ == '__main__':
     main()

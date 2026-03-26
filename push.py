@@ -60,9 +60,22 @@ def push_to_discussion(content):
         return False
 
 if __name__ == '__main__':
-    import sys
-    if len(sys.argv) > 1:
-        content = sys.argv[1]
+    # 优先从 stdin 读取，其次从命令行参数
+    content = None
+    
+    # 检查是否有管道输入
+    if not sys.stdin.isatty():
+        content = sys.stdin.read().strip()
+    elif len(sys.argv) > 1:
+        # 从文件读取
+        filepath = sys.argv[1]
+        if os.path.isfile(filepath):
+            with open(filepath, 'r') as f:
+                content = f.read()
+        else:
+            content = sys.argv[1]
+    
+    if content:
         push_to_discussion(content)
     else:
-        print("用法: python3 push.py <content>")
+        print("用法: python push.py <content> 或 cat file.txt | python push.py")
