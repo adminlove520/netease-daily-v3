@@ -7,6 +7,10 @@ import os
 import sys
 import subprocess
 
+# 加载 .env 文件（本地开发时使用）
+from dotenv import load_dotenv
+load_dotenv()
+
 def main():
     print("=== 🎵 每日一歌 ===\n")
     
@@ -42,10 +46,12 @@ def main():
             print(f"❌ 获取失败: {result.stderr}")
             return
     
-    # 推送
-    if content:
+    # 推送（需要 GH_TOKEN 才推送）
+    if content and os.environ.get('GH_TOKEN'):
         print("\n📤 推送到 Discussion...")
         subprocess.run(['python3', 'push.py', content])
+    elif content:
+        print("\n⚠️ 未设置 GH_TOKEN，仅获取内容不推送")
 
 if __name__ == '__main__':
     main()

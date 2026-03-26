@@ -4,12 +4,18 @@
 推送到 GitHub Discussion
 """
 import os
+import sys
 import requests
+from pathlib import Path
 
-# Discussion 配置
-REPO_OWNER = "ythx-101"
-REPO_NAME = "openclaw-qa"
-DISCUSSION_ID = 133
+# 加载 .env 文件
+from dotenv import load_dotenv
+load_dotenv()
+
+# Discussion 配置（支持环境变量覆盖）
+REPO_OWNER = os.getenv('REPO_OWNER', 'ythx-101')
+REPO_NAME = os.getenv('REPO_NAME', 'openclaw-qa')
+DISCUSSION_ID = int(os.getenv('DISCUSSION_ID', '133'))
 
 def push_to_discussion(content):
     """推送到 GitHub Discussion"""
