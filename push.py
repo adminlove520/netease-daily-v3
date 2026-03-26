@@ -15,7 +15,8 @@ load_dotenv()
 # Discussion 配置（支持环境变量覆盖）
 REPO_OWNER = os.getenv('REPO_OWNER', 'ythx-101')
 REPO_NAME = os.getenv('REPO_NAME', 'openclaw-qa')
-DISCUSSION_ID = int(os.getenv('DISCUSSION_ID', '133'))
+# Discussion #133 的 GraphQL global ID
+DISCUSSION_ID = os.getenv('DISCUSSION_ID', 'D_kwDORQmU5s4Ak6Wg')
 
 def push_to_discussion(content):
     """推送到 GitHub Discussion"""
