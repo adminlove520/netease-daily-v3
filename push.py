@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 """
 网易云音乐 - 推送模块
@@ -6,16 +7,20 @@
 import os
 import sys
 import requests
-from pathlib import Path
+
+# 强制 UTF-8 输出
+if sys.platform == 'win32':
+    import codecs
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
 # 加载 .env 文件
 from dotenv import load_dotenv
 load_dotenv()
 
-# Discussion 配置（支持环境变量覆盖）
+# Discussion 配置
 REPO_OWNER = os.getenv('REPO_OWNER', 'ythx-101')
 REPO_NAME = os.getenv('REPO_NAME', 'openclaw-qa')
-# Discussion #133 的 GraphQL global ID
 DISCUSSION_ID = os.getenv('DISCUSSION_ID', 'D_kwDORQmU5s4Ak6Wg')
 
 def push_to_discussion(content):
@@ -41,7 +46,7 @@ def push_to_discussion(content):
     url = "https://api.github.com/graphql"
     headers = {
         "Authorization": f"bearer {token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json; charset=utf-8"
     }
     
     try:
@@ -60,22 +65,19 @@ def push_to_discussion(content):
         return False
 
 if __name__ == '__main__':
-    # 优先从 stdin 读取，其次从命令行参数
     content = None
     
-    # 检查是否有管道输入
-    if not sys.stdin.isatty():
-        content = sys.stdin.read().strip()
-    elif len(sys.argv) > 1:
-        # 从文件读取
+    # 从文件读取
+    if len(sys.argv) > 1:
         filepath = sys.argv[1]
         if os.path.isfile(filepath):
-            with open(filepath, 'r') as f:
+            with open(filepath, 'r', encoding='utf-8') as f:
                 content = f.read()
-        else:
-            content = sys.argv[1]
+    # 从 stdin 读取
+    elif not sys.stdin.isatty():
+        content = sys.stdin.read()
     
     if content:
         push_to_discussion(content)
     else:
-        print("用法: python push.py <content> 或 cat file.txt | python push.py")
+        print("用法: python push.py <file.txt> 或 cat file.txt | python push.py")
