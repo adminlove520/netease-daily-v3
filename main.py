@@ -11,6 +11,9 @@ import subprocess
 from dotenv import load_dotenv
 load_dotenv()
 
+# 获取 Python 解释器（兼容 Windows）
+PYTHON = sys.executable if sys.platform == 'win32' else 'python3'
+
 def main():
     print("=== 🎵 每日一歌 ===\n")
     
@@ -21,7 +24,7 @@ def main():
     # 先尝试每日推荐
     if has_cookie:
         print("✓ 已登录，尝试获取每日推荐...")
-        result = subprocess.run(['python3', 'netease_client.py', 'daily'], 
+        result = subprocess.run([PYTHON, 'netease_client.py', 'daily'], 
                                 capture_output=True, text=True, timeout=30)
         
         if result.returncode == 0 and 'ERROR' not in result.stdout and '❌' not in result.stdout:
@@ -36,7 +39,7 @@ def main():
             print("⚠️ 每日推荐获取失败")
         
         print("\n尝试获取公开榜单...\n")
-        result = subprocess.run(['python3', 'netease_public_api.py', 'daily'],
+        result = subprocess.run([PYTHON, 'netease_public_api.py', 'daily'],
                                capture_output=True, text=True, timeout=30)
         
         if result.returncode == 0:
