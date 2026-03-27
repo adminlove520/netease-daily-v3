@@ -7,313 +7,338 @@ import requests
 import json
 import base64
 import os
+import sys
 from datetime import datetime
+from urllib.parse import quote
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
+# lyric-sense 网页地址（可通过环境变量覆盖）
+LYRIC_SENSE_URL = os.getenv(
+    'LYRIC_SENSE_URL',
+    'https://adminlove520.github.io/lyric-sense'
+)
+
+
 class NeteaseCrypto:
     """网易云加密工具"""
-    
-    # 网易云固定密钥
-    MODULUS = '00e0b509f6259df8642dbc35662901477df22677ec152b5ff68ace615bb7b725152b3ab17a876aea8a5aa76d2e417629ec4ee341f56135fccf695280104e0312ecbda92557c93870114af6c9d05c4f7f0c3685b7a46bee255932575cce10b424d813cfe4875d3e82047b97ddef52741d546b8e289dc6935b3ece0462db0a22b8e7'
-    NONCE = '0CoJUm6Qyw8W8jud'
+
+    MODULUS = ('00e0b509f6259df8642dbc35662901477df22677ec152b5ff68ace615bb7b725'
+               '152b3ab17a876aea8a5aa76d2e417629ec4ee341f56135fccf695280104e0312'
+               'ecbda92557c93870114af6c9d05c4f7f0c3685b7a46bee255932575cce10b42'
+               '4d813cfe4875d3e82047b97ddef52741d546b8e289dc6935b3ece0462db0a22b8e7')
+    NONCE  = '0CoJUm6Qyw8W8jud'
     PUBKEY = '010001'
-    IV = '0102030405060708'
-    
+    IV     = '0102030405060708'
+
     @staticmethod
-    def aes_encrypt(text, key):
-        """AES-CBC加密"""
-        # PKCS7填充
+    def aes_encrypt(text: str, key: str) -> str:
+        """AES-CBC 加密（PKCS7 填充）"""
         pad_len = 16 - len(text) % 16
-        text = text + chr(pad_len) * pad_len
-        
+        text += chr(pad_len) * pad_len
         cipher = Cipher(
             algorithms.AES(key.encode('utf-8')),
             modes.CBC(NeteaseCrypto.IV.encode('utf-8')),
             backend=default_backend()
         )
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(text.encode('utf-8')) + encryptor.finalize()
-        return base64.b64encode(ciphertext).decode('utf-8')
-    
+        enc = cipher.encryptor()
+        return base64.b64encode(enc.update(text.encode('utf-8')) + enc.finalize()).decode('utf-8')
+
     @staticmethod
-    def rsa_encrypt(text, pubkey, modulus):
-        """RSA加密"""
-        text = text[::-1]  # 反转字符串
-        text_bytes = text.encode('utf-8')
-        text_int = int.from_bytes(text_bytes, 'big')
-        
-        pubkey_int = int(pubkey, 16)
-        modulus_int = int(modulus, 16)
-        
-        result = pow(text_int, pubkey_int, modulus_int)
+    def rsa_encrypt(text: str, pubkey: str, modulus: str) -> str:
+        """RSA 加密"""
+        text_int = int.from_bytes(text[::-1].encode('utf-8'), 'big')
+        result   = pow(text_int, int(pubkey, 16), int(modulus, 16))
         return format(result, 'x').zfill(256)
-    
+
     @staticmethod
-    def encrypt(params):
-        """网易云weapi加密"""
-        # 生成随机密钥 (16位小写字母)
-        sec_key = ''.join([chr(ord('a') + (os.urandom(1)[0] % 26)) for _ in range(16)])
-        
-        # 第一次AES加密
-        text = json.dumps(params)
-        enc_text = NeteaseCrypto.aes_encrypt(text, NeteaseCrypto.NONCE)
-        
-        # 第二次AES加密
+    def encrypt(params: dict) -> dict:
+        """网易云 weapi 加密"""
+        sec_key  = ''.join(chr(ord('a') + (b % 26)) for b in os.urandom(16))
+        enc_text = NeteaseCrypto.aes_encrypt(json.dumps(params), NeteaseCrypto.NONCE)
         enc_text = NeteaseCrypto.aes_encrypt(enc_text, sec_key)
-        
-        # RSA加密密钥
-        enc_sec_key = NeteaseCrypto.rsa_encrypt(sec_key, NeteaseCrypto.PUBKEY, NeteaseCrypto.MODULUS)
-        
-        return {
-            'params': enc_text,
-            'encSecKey': enc_sec_key
-        }
+        enc_key  = NeteaseCrypto.rsa_encrypt(sec_key, NeteaseCrypto.PUBKEY, NeteaseCrypto.MODULUS)
+        return {'params': enc_text, 'encSecKey': enc_key}
+
 
 class NeteaseMusicClient:
     """网易云音乐客户端"""
-    
-    def __init__(self):
+
+    DEFAULT_HEADERS = {
+        'User-Agent': (
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) '
+            'Chrome/120.0.0.0 Safari/537.36'
+        ),
+        'Referer':      'https://music.163.com/',
+        'Origin':       'https://music.163.com',
+        'Accept':       '*/*',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'Content-Type': 'application/x-www-form-urlencoded',
+    }
+
+    def __init__(self, cookies_file: str = 'secrets/netease_cookies.json'):
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0',
-            'Referer': 'https://music.163.com/',
-            'Origin': 'https://music.163.com',
-            'Accept': '*/*',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
-            'Content-Type': 'application/x-www-form-urlencoded'
-        })
+        self.session.headers.update(self.DEFAULT_HEADERS)
         self.crypto = NeteaseCrypto()
-        self.cookies_file = 'secrets/netease_cookies.json'
-        
-    def weapi_request(self, endpoint, params=None):
-        """调用weapi接口"""
-        url = f'https://music.163.com/weapi{endpoint}'
+        self.cookies_file = cookies_file
+
+    # ── 底层请求 ──────────────────────────────────────
+    def weapi_request(self, endpoint: str, params: dict = None) -> dict:
+        url    = f'https://music.163.com/weapi{endpoint}'
         params = params or {}
-        
-        # csrf_token
-        cookies = self.session.cookies.get_dict()
-        params['csrf_token'] = cookies.get('__csrf', '')
-        
-        # 加密参数
-        data = self.crypto.encrypt(params)
-        
+        params['csrf_token'] = self.session.cookies.get('__csrf', '')
         try:
-            response = self.session.post(url, data=data, timeout=15)
-            return response.json()
+            resp = self.session.post(url, data=self.crypto.encrypt(params), timeout=15)
+            resp.raise_for_status()
+            return resp.json()
         except Exception as e:
-            print(f"❌ 请求失败: {e}")
+            print(f'❌ 请求失败: {e}', file=sys.stderr)
             return {'code': -1, 'msg': str(e)}
-    
-    def send_captcha(self, phone):
-        """发送验证码"""
+
+    # ── 认证 ──────────────────────────────────────────
+    def send_captcha(self, phone: str) -> bool:
         result = self.weapi_request('/sms/captcha/sent', {
-            'cellphone': phone,
-            'ctcode': '86'
+            'cellphone': phone, 'ctcode': '86'
         })
-        
         if result.get('code') == 200:
-            print(f"✅ 验证码已发送到 {phone}")
-            print("⏰ 验证码5分钟内有效，请查收短信")
+            print(f'✅ 验证码已发送到 {phone}（5 分钟内有效）')
             return True
-        else:
-            msg = result.get('message', result.get('msg', '未知错误'))
-            print(f"❌ 发送失败: {msg}")
-            return False
-    
-    def login_with_captcha(self, phone, captcha):
-        """使用验证码登录"""
+        print(f'❌ 发送失败: {result.get("message", result.get("msg", "未知错误"))}')
+        return False
+
+    def login_with_captcha(self, phone: str, captcha: str) -> bool:
         result = self.weapi_request('/login/cellphone', {
-            'phone': phone,
-            'captcha': captcha,
-            'countrycode': '86',
-            'rememberLogin': 'true'
+            'phone': phone, 'captcha': captcha,
+            'countrycode': '86', 'rememberLogin': 'true'
         })
-        
         if result.get('code') == 200:
-            profile = result.get('profile', {})
-            nickname = profile.get('nickname', '用户')
-            print(f"✅ 登录成功！欢迎回来，{nickname}～")
+            nickname = result.get('profile', {}).get('nickname', '用户')
+            print(f'✅ 登录成功！欢迎回来，{nickname}～')
             self.save_cookies()
             return True
-        else:
-            msg = result.get('message', result.get('msg', '未知错误'))
-            print(f"❌ 登录失败: {msg}")
-            return False
-    
-    def get_daily_recommend(self):
-        """获取每日推荐歌曲"""
+        print(f'❌ 登录失败: {result.get("message", result.get("msg", "未知错误"))}')
+        return False
+
+    # ── 数据接口 ──────────────────────────────────────
+    def get_daily_recommend(self) -> list:
+        """获取个性化日推歌曲（需要登录）"""
         result = self.weapi_request('/v1/discovery/recommend/songs', {
-            'offset': 0,
-            'total': True,
-            'limit': 20
+            'offset': 0, 'total': True, 'limit': 20
         })
-        
         if result.get('code') == 200:
-            data = result.get('data', {})
-            return data.get('dailySongs', [])
+            return result.get('data', {}).get('dailySongs', [])
         return []
-    
-    def get_song_detail(self, song_ids):
-        """获取歌曲详情（包含风格标签）"""
-        if isinstance(song_ids, list):
-            ids = ','.join([str(id) for id in song_ids])
-        else:
-            ids = str(song_ids)
-        
-        result = self.weapi_request('/v3/song/detail', {
-            'c': json.dumps([{'id': int(id)} for id in ids.split(',')]),
-            'ids': ids
+
+    def get_song_detail(self, song_ids: list) -> list:
+        """获取歌曲详情（含别名/风格标签）"""
+        ids_str = ','.join(str(i) for i in song_ids)
+        result  = self.weapi_request('/v3/song/detail', {
+            'c':   json.dumps([{'id': int(i)} for i in song_ids]),
+            'ids': ids_str,
         })
-        
-        if result.get('code') == 200:
-            return result.get('songs', [])
-        return []
-    
-    def get_song_url(self, song_id):
-        """获取歌曲播放链接"""
-        result = self.weapi_request('/song/enhance/player/url', {
-            'ids': [song_id],
-            'br': 320000
-        })
-        
-        if result.get('code') == 200:
-            data = result.get('data', [])
-            if data:
-                return data[0].get('url')
-        return None
-    
-    def save_cookies(self):
-        """保存登录状态"""
+        return result.get('songs', []) if result.get('code') == 200 else []
+
+    # ── Cookie 管理 ───────────────────────────────────
+    def save_cookies(self) -> None:
         os.makedirs(os.path.dirname(self.cookies_file), exist_ok=True)
-        # 处理重复的cookie，只保留第一个
-        cookies_dict = {}
-        for cookie in self.session.cookies:
-            if cookie.name not in cookies_dict:
-                cookies_dict[cookie.name] = cookie.value
-        with open(self.cookies_file, 'w') as f:
-            json.dump(cookies_dict, f)
-        print("💾 登录状态已保存")
-    
-    def load_cookies(self):
-        """加载登录状态"""
+        seen, cookies_dict = set(), {}
+        for c in self.session.cookies:
+            if c.name not in seen:
+                cookies_dict[c.name] = c.value
+                seen.add(c.name)
+        with open(self.cookies_file, 'w', encoding='utf-8') as f:
+            json.dump(cookies_dict, f, ensure_ascii=False, indent=2)
+        print('💾 登录状态已保存')
+
+    def load_cookies(self) -> bool:
         try:
-            with open(self.cookies_file, 'r') as f:
-                cookies = json.load(f)
-                self.session.cookies.update(cookies)
-                return True
+            with open(self.cookies_file, 'r', encoding='utf-8') as f:
+                self.session.cookies.update(json.load(f))
+            return True
         except (FileNotFoundError, json.JSONDecodeError):
             return False
 
-def format_daily_songs(songs, date_str=None):
-    """格式化日推歌曲"""
+
+# ── 工具函数 ─────────────────────────────────────────
+
+def _lyric_sense_link(artist: str, name: str) -> str:
+    """生成 lyric-sense 歌词界面链接"""
+    return (f'{LYRIC_SENSE_URL}/'
+            f'?artist={quote(artist)}&title={quote(name)}')
+
+
+def _lrc_api_link(artist: str, name: str) -> str:
+    """生成 LrcApi 直接查询链接"""
+    return (f'https://api.lrc.cx/lyrics'
+            f'?artist={quote(artist)}&title={quote(name)}')
+
+
+def _duration_str(ms: int) -> str:
+    """毫秒转 mm:ss"""
+    sec = ms // 1000
+    return f'{sec // 60}:{sec % 60:02d}'
+
+
+def _normalize_song(song: dict) -> dict:
+    """将原始 song 对象规范化为统一结构"""
+    song_id = song.get('id', '')
+    name    = song.get('name', '未知')
+    artists = song.get('artists', song.get('ar', []))
+    artist  = ' / '.join(a.get('name', '') for a in artists[:2] if a.get('name'))
+    album   = (song.get('album') or song.get('al') or {}).get('name', '')
+    dur_ms  = song.get('dt', song.get('duration', 0))
+    tags    = song.get('tags') or []
+    reason  = song.get('reason', '')
+
+    nc_url      = f'https://music.163.com/song?id={song_id}' if song_id else ''
+    lyric_page  = _lyric_sense_link(artist, name) if artist else ''
+    lrc_api     = _lrc_api_link(artist, name)     if artist else ''
+
+    return {
+        'id':         song_id,
+        'name':       name,
+        'artist':     artist,
+        'album':      album,
+        'duration':   _duration_str(dur_ms) if dur_ms else '',
+        'url':        nc_url,
+        'lyric_url':  lyric_page,
+        'lrc_api':    lrc_api,
+        'tags':       tags,
+        'reason':     reason,
+    }
+
+
+def format_daily_songs(songs: list, date_str: str = None,
+                       source: str = '日推', output_json: bool = False) -> str:
+    """
+    格式化歌曲列表。
+
+    Args:
+        songs:       原始歌曲列表（来自 weapi 或公开 API）
+        date_str:    显示日期字符串，默认今日
+        source:      来源标签，如「日推」「飙升榜」
+        output_json: 若 True，返回 JSON 格式（供龙虾进一步调用）
+
+    Returns:
+        Markdown 格式字符串（GitHub Discussion 友好）或 JSON 字符串
+    """
     if not songs:
-        return "❌ 暂无推荐歌曲"
-    
-    date = date_str or datetime.now().strftime('%m月%d日')
-    
-    lines = [
-        "🎵 网易云日推",
-        f"📅 {date}",
-        "💝 专属于你的每日推荐",
-        "=" * 40,
-        ""
-    ]
-    
-    for i, song in enumerate(songs[:10], 1):
-        name = song.get('name', '未知')
-        song_id = song.get('id', '')
-        song_url = f"https://music.163.com/song?id={song_id}" if song_id else ''
-        
-        artists = song.get('artists', [])
-        artist_names = ' / '.join([a.get('name', '未知') for a in artists[:2]])
-        
-        album = song.get('album', {})
-        album_name = album.get('name', '')
-        
-        # 获取风格标签（如果有）
-        tags = []
-        if 'tags' in song and song['tags']:
-            tags = song['tags']
-        elif 'genre' in song and song['genre']:
-            tags = [song['genre']]
-        
-        # 获取推荐理由
-        reason = song.get('reason', '')
-        
-        lines.append(f"{i:2d}. {name}")
-        lines.append(f"    🎤 {artist_names}")
-        if album_name:
-            lines.append(f"    💿 {album_name}")
-        if tags:
-            lines.append(f"    🏷️ {' | '.join(tags[:3])}")
-        if reason:
-            lines.append(f"    💡 {reason}")
-        if song_url:
-            lines.append(f"    🔗 {song_url}")
-        lines.append("")
-    
-    lines.extend([
-        "─" * 40,
-        "🎧 打开网易云音乐App收听完整版",
-        "🌟 每日6:00更新，错过就听不到了哦～"
-    ])
-    
-    return '\n'.join(lines)
+        return '❌ 暂无推荐歌曲'
+
+    date      = date_str or datetime.now().strftime('%m月%d日')
+    year      = datetime.now().strftime('%Y')
+    norm_list = [_normalize_song(s) for s in songs[:10]]
+
+    # ── JSON 输出 ──────────────────────────────────────
+    if output_json:
+        payload = {
+            'date':   datetime.now().strftime('%Y-%m-%d'),
+            'type':   source,
+            'source': 'netease-daily-v3',
+            'songs':  norm_list,
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    # ── Markdown 输出 ─────────────────────────────────
+    header = (
+        f'## 🎵 网易云 · {source} · {date}\n\n'
+        f'> 📅 {year}年{date} · 共 {len(norm_list)} 首'
+        + (f'  \n> 🎧 [打开网易云](https://music.163.com/)' if True else '')
+        + '\n\n'
+    )
+
+    # 歌曲表格
+    table_rows = ['| # | 歌曲 | 歌手 | 专辑 | 时长 | 歌词 |',
+                  '|---|------|------|------|------|------|']
+
+    for i, s in enumerate(norm_list, 1):
+        name_cell   = f'[{s["name"]}]({s["url"]})' if s['url'] else s['name']
+        lyric_cell  = f'[🎵 歌词]({s["lyric_url"]})' if s['lyric_url'] else '—'
+        album_cell  = s['album'] or '—'
+        dur_cell    = s['duration'] or '—'
+        table_rows.append(
+            f'| {i} | {name_cell} | {s["artist"] or "—"} | {album_cell} | {dur_cell} | {lyric_cell} |'
+        )
+
+    # 带推荐理由的附加信息（折叠展示）
+    detail_lines = []
+    for i, s in enumerate(norm_list, 1):
+        extras = []
+        if s['tags']:
+            extras.append(f'🏷️ {" · ".join(s["tags"][:3])}')
+        if s['reason']:
+            extras.append(f'💡 {s["reason"]}')
+        if extras:
+            detail_lines.append(f'**{i}. {s["name"]}** — ' + '  '.join(extras))
+
+    details_block = ''
+    if detail_lines:
+        details_block = ('\n<details>\n<summary>📖 推荐理由 & 风格标签</summary>\n\n'
+                         + '\n'.join(detail_lines)
+                         + '\n\n</details>\n')
+
+    footer = (
+        '\n---\n'
+        '🦞 由 [netease-daily-v3](https://github.com/adminlove520/netease-daily-v3) 自动推送  '
+        '· 歌词由 [lyric-sense](https://github.com/adminlove520/lyric-sense) 提供  \n'
+        '🌟 每日 09:00 更新'
+    )
+
+    return header + '\n'.join(table_rows) + '\n' + details_block + footer
+
 
 def main():
-    import sys
     client = NeteaseMusicClient()
-    
+
     if len(sys.argv) < 2:
-        print("用法:")
-        print("  python3 netease_client.py send_captcha <手机号>")
-        print("  python3 netease_client.py login <手机号> <验证码>")
-        print("  python3 netease_client.py daily")
+        print('用法:')
+        print('  python3 netease_client.py send_captcha <手机号>')
+        print('  python3 netease_client.py login <手机号> <验证码>')
+        print('  python3 netease_client.py daily [--json]')
         return
-    
-    cmd = sys.argv[1]
-    
-    if cmd == 'send_captcha' and len(sys.argv) > 2:
-        phone = sys.argv[2]
-        client.send_captcha(phone)
-        
-    elif cmd == 'login' and len(sys.argv) > 3:
-        phone = sys.argv[2]
-        captcha = sys.argv[3]
-        client.login_with_captcha(phone, captcha)
-        
+
+    cmd  = sys.argv[1]
+    args = sys.argv[2:]
+
+    if cmd == 'send_captcha' and args:
+        client.send_captcha(args[0])
+
+    elif cmd == 'login' and len(args) >= 2:
+        client.login_with_captcha(args[0], args[1])
+
     elif cmd == 'daily':
-        if client.load_cookies():
-            songs = client.get_daily_recommend()
-            if songs:
-                # 获取歌曲详情（包含风格标签）
-                print("正在获取歌曲风格标签...")
-                song_ids = [song.get('id') for song in songs[:10] if song.get('id')]
-                song_details = client.get_song_detail(song_ids)
-                
-                # 将详情信息合并到歌曲数据中
-                details_map = {s.get('id'): s for s in song_details}
-                for song in songs:
-                    song_id = song.get('id')
-                    if song_id in details_map:
-                        detail = details_map[song_id]
-                        # 合并风格标签
-                        if 'tags' in detail and detail['tags']:
-                            song['tags'] = detail['tags']
-                        # 从alia或transNames获取风格信息
-                        alia = detail.get('alia', [])
-                        if alia and not song.get('tags'):
-                            song['tags'] = alia[:2]
-                
-                print(format_daily_songs(songs))
-            else:
-                print("❌ 获取日推失败，请检查登录状态")
-        else:
-            print("❌ 未登录，请先使用 login 命令登录")
-    
+        output_json = '--json' in args
+        if not client.load_cookies():
+            print('❌ 未登录，请先使用 login 命令登录', file=sys.stderr)
+            sys.exit(1)
+
+        songs = client.get_daily_recommend()
+        if not songs:
+            print('❌ 获取日推失败，请检查登录状态', file=sys.stderr)
+            sys.exit(1)
+
+        # 获取歌曲详情（含标签）
+        song_ids     = [s.get('id') for s in songs[:10] if s.get('id')]
+        song_details = client.get_song_detail(song_ids)
+        details_map  = {s.get('id'): s for s in song_details}
+
+        for song in songs:
+            detail = details_map.get(song.get('id'), {})
+            if detail.get('tags'):
+                song['tags'] = detail['tags']
+            elif not song.get('tags'):
+                song['tags'] = detail.get('alia', [])[:2]
+            # 补充时长
+            if not song.get('dt') and detail.get('dt'):
+                song['dt'] = detail['dt']
+
+        print(format_daily_songs(songs, output_json=output_json))
+
     else:
-        print(f"未知命令: {cmd}")
+        print(f'未知命令: {cmd}', file=sys.stderr)
+        sys.exit(1)
+
 
 if __name__ == '__main__':
     main()

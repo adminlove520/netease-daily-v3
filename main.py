@@ -1,73 +1,92 @@
 #!/usr/bin/env python3
 """
-网易云音乐 - 主程序
-自动判断：Cookie 有效→日推，无效→榜单
+网易云音乐 · 每日一歌
+自动判断：Cookie 有效 → 个性化日推；无效 → 公开榜单
 """
 import os
 import sys
-import subprocess
 
-# 加载 .env 文件（本地开发时使用）
 from dotenv import load_dotenv
 load_dotenv()
 
-# 获取 Python 解释器（兼容 Windows）
-PYTHON = sys.executable if sys.platform == 'win32' else 'python3'
+from netease_client import NeteaseMusicClient, format_daily_songs
+from netease_public_api import push_daily as public_daily
 
-def main():
-    print("=== 🎵 每日一歌 ===\n")
-    
+
+def get_daily_content(output_json: bool = False) -> str | None:
+    """
+    尝试获取内容：
+    1. Cookie 存在 → 尝试个性化日推
+    2. 日推失败或无 Cookie → 公开榜单
+    返回格式化后的字符串，失败返回 None。
+    """
     cookie_file = 'secrets/netease_cookies.json'
-    has_cookie = os.path.exists(cookie_file)
-    content = None
-    
-    # 先尝试每日推荐
-    if has_cookie:
-        print("✓ 已登录，尝试获取每日推荐...")
-        result = subprocess.run([PYTHON, 'netease_client.py', 'daily'], 
-                                capture_output=True, text=True, timeout=30)
-        
-        # 检查是否成功（不包含错误关键字）
-        if result.returncode == 0 and 'ERROR' not in result.stdout and '❌' not in result.stdout:
-            content = result.stdout
-            print("\n✅ 每日推荐获取成功！")
+    client      = NeteaseMusicClient(cookies_file=cookie_file)
+    content     = None
+
+    if os.path.exists(cookie_file):
+        print('✓ 检测到 Cookie，尝试获取个性化日推...', flush=True)
+        if client.load_cookies():
+            songs = client.get_daily_recommend()
+            if songs:
+                # 补充歌曲详情（标签/别名/时长）
+                song_ids     = [s.get('id') for s in songs[:10] if s.get('id')]
+                song_details = client.get_song_detail(song_ids)
+                details_map  = {s.get('id'): s for s in song_details}
+                for song in songs:
+                    detail = details_map.get(song.get('id'), {})
+                    if detail.get('tags') and not song.get('tags'):
+                        song['tags'] = detail['tags']
+                    elif not song.get('tags'):
+                        song['tags'] = detail.get('alia', [])[:2]
+                    if not song.get('dt') and detail.get('dt'):
+                        song['dt'] = detail['dt']
+
+                content = format_daily_songs(songs, source='日推', output_json=output_json)
+                print('✅ 个性化日推获取成功！', flush=True)
+            else:
+                print('⚠️  日推接口返回空，Cookie 可能已过期', flush=True)
         else:
-            print(f"⚠️ 日推失败: {result.stderr or result.stdout[:200]}")
-    
-    # 失败或无 Cookie
+            print('⚠️  Cookie 格式异常', flush=True)
+    else:
+        print('⚠️  未检测到 Cookie，跳过日推', flush=True)
+
     if not content:
-        if not has_cookie:
-            print("⚠️ 未登录")
+        print('\n↩  切换到公开榜单（飙升榜）...', flush=True)
+        content = public_daily('飙升榜', output_json=output_json)
+        if content and '❌' not in content:
+            print('✅ 公开榜单获取成功', flush=True)
         else:
-            print("⚠️ 每日推荐获取失败")
-        
-        print("\n尝试获取公开榜单...\n")
-        result = subprocess.run([PYTHON, 'netease_public_api.py', 'daily'],
-                               capture_output=True, text=True, timeout=30)
-        
-        if result.returncode == 0 and result.stdout:
-            content = result.stdout
-            print("\n✅ 公开榜单获取成功")
-        else:
-            print(f"❌ 获取榜单失败: {result.stderr or result.stdout[:200]}")
-            return
-    
-    # 推送（需要 GH_TOKEN 才推送）
-    if content and os.environ.get('GH_TOKEN'):
-        print("\n📤 推送到 Discussion...")
-        # Windows 需要用 shell=True 或通过文件传递
-        if sys.platform == 'win32':
-            # 写入临时文件
-            with open('temp_content.txt', 'w', encoding='utf-8') as f:
-                f.write(content)
-            subprocess.run([PYTHON, 'push.py', 'temp_content.txt'])
-            os.remove('temp_content.txt')
-        else:
-            subprocess.run([PYTHON, 'push.py'], input=content, text=True)
-    elif content:
-        print("\n⚠️ 未设置 GH_TOKEN，仅获取内容不推送")
-        print("\n" + "="*40)
+            print('❌ 公开榜单获取失败', file=sys.stderr)
+            return None
+
+    return content
+
+
+def push_content(content: str) -> bool:
+    """将内容推送到 GitHub Discussion"""
+    from push import push_to_discussion
+    return push_to_discussion(content)
+
+
+def main() -> None:
+    output_json = '--json' in sys.argv
+    print('=== 🎵 每日一歌 ===\n', flush=True)
+
+    content = get_daily_content(output_json=output_json)
+    if not content:
+        print('❌ 无法获取任何内容，退出', file=sys.stderr)
+        sys.exit(1)
+
+    gh_token = os.environ.get('GH_TOKEN')
+    if gh_token:
+        print('\n📤 推送到 GitHub Discussion...', flush=True)
+        push_content(content)
+    else:
+        print('\n⚠️  未设置 GH_TOKEN，仅打印内容（不推送）\n', flush=True)
+        print('=' * 60)
         print(content)
+
 
 if __name__ == '__main__':
     main()
